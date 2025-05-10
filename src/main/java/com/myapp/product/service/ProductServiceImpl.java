@@ -1,7 +1,7 @@
 package com.myapp.product.service;
 
-import com.myapp.product.annotation.Retry;
-import com.myapp.product.exception.CustomOptimisticLockException;
+import com.myapp.annotation.Retry;
+import com.myapp.exception.CustomOptimisticLockException;
 import com.myapp.product.mapper.ProductMapper;
 import com.myapp.product.model.Product;
 import org.springframework.beans.factory.annotation.Autowired;

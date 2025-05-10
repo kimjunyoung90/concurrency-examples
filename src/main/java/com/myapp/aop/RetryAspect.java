@@ -1,7 +1,7 @@
-package com.myapp.product.aop;
+package com.myapp.aop;
 
-import com.myapp.product.annotation.Retry;
-import com.myapp.product.exception.CustomOptimisticLockException;
+import com.myapp.annotation.Retry;
+import com.myapp.exception.CustomOptimisticLockException;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
