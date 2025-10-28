@@ -62,8 +62,6 @@ class StockServiceTest {
 //                    stockService.decreaseWithSynchronized(stockId, 1L);
 //                    stockService.decreaseWithPessimisticLock(stockId, 1L);
                     optimisticLockStockFacade.decrease(stockId, 1L);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
                 } finally {
                     latch.countDown();
                 }
