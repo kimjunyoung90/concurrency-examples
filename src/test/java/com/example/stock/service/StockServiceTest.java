@@ -1,6 +1,7 @@
 package com.example.stock.service;
 
 import com.example.stock.domain.Stock;
+import com.example.stock.facade.OptimisticLockStockFacade;
 import com.example.stock.repository.StockRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,11 +22,17 @@ class StockServiceTest {
     private StockService stockService;
 
     @Autowired
+    private OptimisticLockStockFacade optimisticLockStockFacade;
+
+    @Autowired
     private StockRepository stockRepository;
+
+    private Long stockId;
 
     @BeforeEach
     public void before() {
-        stockRepository.saveAndFlush(new Stock(1L, 100L));
+        Stock stock = stockRepository.saveAndFlush(new Stock(1L, 100L));
+        stockId = stock.getId();
     }
 
     @AfterEach
@@ -35,9 +42,9 @@ class StockServiceTest {
 
     @Test
     public void 재고_감소() {
-        stockService.decrease(1L, 1L);
+        stockService.decrease(stockId, 1L);
 
-        Stock stock = stockRepository.findById(1L).orElseThrow();
+        Stock stock = stockRepository.findById(stockId).orElseThrow();
 
         assertEquals(99, stock.getQuantity());
     }
@@ -51,7 +58,12 @@ class StockServiceTest {
         for (int i = 0; i < threadCount; i++) {
             executorService.submit(() -> {
                 try {
-                    stockService.decrease(1L, 1L);
+//                    stockService.decrease(stockId, 1L);
+//                    stockService.decreaseWithSynchronized(stockId, 1L);
+//                    stockService.decreaseWithPessimisticLock(stockId, 1L);
+                    optimisticLockStockFacade.decrease(stockId, 1L);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
                 } finally {
                     latch.countDown();
                 }
@@ -60,7 +72,7 @@ class StockServiceTest {
 
         latch.await();
 
-        Stock stock = stockRepository.findById(1L).orElseThrow();
+        Stock stock = stockRepository.findById(stockId).orElseThrow();
         assertEquals(0, stock.getQuantity());
     }
 }

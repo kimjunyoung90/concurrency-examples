@@ -1,9 +1,6 @@
 package com.example.stock.domain;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 
 @Entity
 public class Stock {
@@ -14,6 +11,9 @@ public class Stock {
 
     private Long quantity;
 
+    @Version
+    private Long version;
+
     public Stock() {
 
     }
@@ -21,6 +21,10 @@ public class Stock {
     public Stock(Long productId, Long quantity) {
         this.productId = productId;
         this.quantity = quantity;
+    }
+
+    public Long getId() {
+        return id;
     }
 
     public Long getQuantity() {
