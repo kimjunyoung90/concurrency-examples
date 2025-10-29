@@ -15,11 +15,6 @@ public class OptimisticLockStockFacade {
         this.stockService = stockService;
     }
 
-    @Retryable(
-            retryFor = {ObjectOptimisticLockingFailureException.class},
-            maxAttempts = 50,
-            backoff = @Backoff(delay = 50)
-    )
     public void decrease(Long id, Long quantity) {
         stockService.decreaseWithOptimisticLock(id, quantity);
     }
