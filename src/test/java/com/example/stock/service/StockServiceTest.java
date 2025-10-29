@@ -61,7 +61,7 @@ class StockServiceTest {
 //                    stockService.decrease(stockId, 1L);
 //                    stockService.decreaseWithSynchronized(stockId, 1L);
 //                    stockService.decreaseWithPessimisticLock(stockId, 1L);
-                    optimisticLockStockFacade.decrease(stockId, 1L);
+                    stockService.decreaseWithOptimisticLock(stockId, 1L);
                 } finally {
                     latch.countDown();
                 }
