@@ -9,8 +9,9 @@ Spring Boot 3 & JPA 기반의 동시성 제어 전략 실습 프로젝트입니�
 - 동시성 문제(Race Condition) 시뮬레이션
 - **Synchronized** 키워드를 활용한 기본적인 동시성 제어
 - **비관적 락(Pessimistic Lock)**: JPA `@Lock(PESSIMISTIC_WRITE)` 활용
-- **낙관적 락(Optimistic Lock)**: JPA `@Version` 필드 기반 처리
-- **Spring Retry**: Facade 패턴과 `@Retryable` 어노테이션을 활용한 재시도 전략
+- **낙관적 락(Optimistic Lock)**: JPA `@Version` + 서비스 계층 `@Retryable`로 낙관적 재시도 적용
+- **MySQL Named Lock**: 네이티브 `get_lock/release_lock`으로 트랜잭션 분리 처리
+- **Redis 기반 분산 락**: Lettuce 스핀 락과 Redisson `tryLock`을 이용한 분산 환경 대응
 - 100개의 동시 요청을 처리하는 통합 테스트 (`ExecutorService` + `CountDownLatch`)
 
 ## 기술 스택
@@ -18,6 +19,8 @@ Spring Boot 3 & JPA 기반의 동시성 제어 전략 실습 프로젝트입니�
 - Java 17
 - Spring Boot 3.5.7
 - Spring Data JPA
+- Spring Data Redis
+- Redisson
 - MySQL 8
 - JUnit 5
 - Spring Retry
@@ -35,14 +38,18 @@ src/
 │   │   ├── repository/
 │   │   │   └── StockRepository.java       # 비관적/낙관적 락 쿼리
 │   │   ├── service/
-│   │   │   └── StockService.java          # 동시성 제어 비즈니스 로직
+│   │   │   └── StockService.java          # 동시성 제어 비즈니스 로직 & @Retryable 적용
 │   │   └── facade/
-│   │       └── OptimisticLockStockFacade.java  # 재시도 전용 계층
+│   │       ├── OptimisticLockStockFacade.java  # 낙관적 락 서비스 진입점
+│   │       ├── NamedLockStockFacade.java       # MySQL Named Lock 처리
+│   │       ├── LettuceLockStockFacade.java     # RedisTemplate 기반 스핀 락
+│   │       └── RedissonLockStockFacade.java    # Redisson tryLock 기반 분산 락
 │   └── resources/
 │       └── application.yaml               # MySQL 설정
 ├── test/
-│   └── java/com/example/stock/service/
-│       └── StockServiceTest.java          # 동시성 테스트
+│   └── java/com/example/stock/
+│       ├── service/StockServiceTest.java        # 서비스 계층 동시성 테스트
+│       └── facade/*FacadeTest.java              # 각 락별 통합 테스트
 └── docs/
     └── concurrency_slides.marp.md         # 학습용 슬라이드
 ```
@@ -74,15 +81,31 @@ CREATE DATABASE stock_example;
 
 # Spring Boot 애플리케이션 실행
 ./gradlew bootRun
+
+# Redis 의존 기능 검증 (Lettuce/Redisson)
+docker run --name redis-lock -p 6379:6379 -d redis:7-alpine
 ```
+
+Redis 컨테이너를 사용하지 않는다면, 로컬 또는 클라우드 Redis 서버를 6379 포트에 띄운 뒤 RedisTemplate/Redisson 설정을 맞춰주세요.
+
+## 추가 동시성 제어 전략
+
+- **Named Lock (`NamedLockStockFacade`)**: MySQL 네이티브 락으로 재고 감소를 감싸고, `REQUIRES_NEW` 트랜잭션(`StockService.decreaseWithNewTransaction`)으로 커밋 타이밍을 분리합니다.
+- **Lettuce 기반 Redis 락 (`LettuceLockStockFacade`)**: `RedisTemplate#setIfAbsent`와 3초 TTL로 스핀락을 구현하고, 획득 실패 시 100ms 대기 후 재시도합니다.
+- **Redisson 분산 락 (`RedissonLockStockFacade`)**: `RLock.tryLock(10, 1, TimeUnit.SECONDS)`로 10초 이내 락을 기다리고, 실패 시 경고 로그를 남깁니다.
+
+각 전략별로 `docs/` 폴더와 테스트(`src/test/java/com/example/stock/facade/*`)를 참고해 재현 시나리오를 확인할 수 있습니다.
 
 ## 동시성 제어 방법 비교
 
 | 방법 | 구현 위치 | 장점 | 단점 |
 |------|-----------|------|------|
-| **Synchronized** | StockService:45 | 구현 간단 | 단일 서버에서만 작동, @Transactional과 함께 사용 불가 |
-| **Pessimistic Lock** | StockService:54 | 강력한 데이터 일관성 | 성능 저하, 데드락 가능성 |
-| **Optimistic Lock + Spring Retry** | StockService:62-68 | 높은 성능, 선언적 재시도 | 충돌 빈번 시 재시도 오버헤드 |
+| **Synchronized** | StockService:46 | 구현 간단 | 단일 JVM에서만 안전 |
+| **Pessimistic Lock** | StockService:55 | 강력한 데이터 일관성 | 트랜잭션 지연, 데드락 위험 |
+| **Optimistic Lock + Spring Retry** | StockService:63-74 | 높은 성능, 선언적 재시도 | 충돌 잦을 때 재시도 오버헤드 |
+| **MySQL Named Lock** | NamedLockStockFacade:18-25 | DB 수준 전역 락, 레거시 환경 호환 | 락 남용 시 병목, 락 누수 주의 |
+| **Redis Lettuce Spin Lock** | LettuceLockStockFacade:19-27 | 구현 단순, TTL로 락 해제 보장 | 스핀으로 인한 CPU 사용량 |
+| **Redisson TryLock** | RedissonLockStockFacade:20-33 | 분산 환경 안정성, 자동 재진입 | Redis 인프라 필요, 외부 종속성 |
 
 ## 핵심 구현 코드
 
@@ -122,31 +145,18 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
 }
 ```
 
-### 3. 재시도 계층 (Spring Retry)
+### 3. 서비스 계층 재시도 (Spring Retry)
 ```java
-@Component
-public class OptimisticLockStockFacade {
-
-    private final StockService stockService;
+@Service
+public class StockService {
 
     @Retryable(
         retryFor = {ObjectOptimisticLockingFailureException.class},
         maxAttempts = 50,
         backoff = @Backoff(delay = 50)
     )
-    public void decrease(Long id, Long quantity) {
-        stockService.decreaseWithOptimisticLock(id, quantity);
-    }
-}
-```
-
-Service는 비즈니스 로직만 담당:
-```java
-@Service
-public class StockService {
-
     @Transactional
-    void decreaseWithOptimisticLock(Long id, Long quantity) {
+    public void decreaseWithOptimisticLock(Long id, Long quantity) {
         Stock stock = stockRepository.findByIdWithOptimisticLock(id);
         stock.decrease(quantity);
         stockRepository.saveAndFlush(stock);
@@ -154,7 +164,63 @@ public class StockService {
 }
 ```
 
-### 4. 동시성 테스트
+### 4. MySQL Named Lock
+```java
+@Component
+public class NamedLockStockFacade {
+
+    @Transactional
+    public void decrease(Long id, Long quantity) {
+        try {
+            lockRepository.getLock(id.toString());
+            stockService.decreaseWithNewTransaction(id, quantity);
+        } finally {
+            lockRepository.releaseLock(id.toString());
+        }
+    }
+}
+```
+
+### 5. Redis 분산 락
+```java
+@Component
+public class LettuceLockStockFacade {
+
+    public void decrease(Long id, Long quantity) throws InterruptedException {
+        while (!redisLockRepository.lock(id)) {
+            Thread.sleep(100);
+        }
+        try {
+            stockService.decrease(id, quantity);
+        } finally {
+            redisLockRepository.unlock(id);
+        }
+    }
+}
+```
+
+```java
+@Component
+public class RedissonLockStockFacade {
+
+    public void decrease(Long id, Long quantity) {
+        RLock lock = redissonClient.getLock(id.toString());
+        try {
+            boolean available = lock.tryLock(10, 1, TimeUnit.SECONDS);
+            if (!available) {
+                System.out.println("lock 획득 실패");
+            }
+            stockService.decrease(id, quantity);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+### 6. 동시성 테스트
 ```java
 @Test
 public void 동시에_100개의_요청() throws InterruptedException {
